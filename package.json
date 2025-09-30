@@ -1,37 +1,4 @@
 {
-<<<<<<< HEAD
-  "name": "neighborhood-safety-alert-system",
-  "version": "1.0.0",
-  "description": "A comprehensive neighborhood safety alert system for real-time community safety information",
-  "main": "server/index.js",
-  "scripts": {
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "cd server && npm run dev",
-    "client": "cd client && npm start",
-    "build": "cd client && npm run build",
-    "install-all": "npm install && cd server && npm install && cd ../client && npm install",
-    "start": "cd server && npm start"
-  },
-  "keywords": [
-    "safety",
-    "neighborhood",
-    "alerts",
-    "community",
-    "real-time",
-    "crime-prevention"
-  ],
-  "author": "Neighborhood Safety Team",
-  "license": "MIT",
-  "devDependencies": {
-    "concurrently": "^8.2.2"
-  },
-  "dependencies": {
-    "@capacitor/android": "^7.4.3",
-    "@capacitor/cli": "^7.4.3",
-    "@capacitor/core": "^7.4.3"
-  }
-}
-=======
   "name": "neighborhood-safety-server",
   "version": "1.0.0",
   "description": "Backend server for Neighborhood Safety Alert System",
@@ -62,5 +29,4 @@
     "nodemon": "^3.0.2",
     "jest": "^29.7.0"
   }
-} 
->>>>>>> c2003761e78082fab97de5f863e678e93e87c8b0
+}
