@@ -29,20 +29,27 @@ const incidentSchema = new mongoose.Schema({
     default: 'medium'
   },
   location: {
-    address: {
-      street: String,
-      city: String,
-      state: String,
-      zipCode: String
+    type: {
+      type: String,
+      enum: ['Point'],
+      required: true,
+      default: 'Point'
     },
     coordinates: {
-      lat: {
-        type: Number,
-        required: true
-      },
-      lng: {
-        type: Number,
-        required: true
+      type: [Number], // ✅ Must be [lng, lat]
+      required: true,
+      validate: {
+        validator: function(v) {
+          return (
+            Array.isArray(v) &&
+            v.length === 2 &&
+            typeof v[0] === 'number' &&
+            typeof v[1] === 'number' &&
+            v[0] >= -180 && v[0] <= 180 && // longitude
+            v[1] >= -90 && v[1] <= 90 // latitude
+          );
+        },
+        message: props => `${props.value} is not a valid [longitude, latitude] coordinate!`
       }
     },
     neighborhood: {
@@ -65,10 +72,7 @@ const incidentSchema = new mongoose.Schema({
       enum: ['pending', 'verified', 'false-alarm', 'resolved'],
       default: 'pending'
     },
-    verifiedBy: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
+    verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     verifiedAt: Date,
     verifiedSource: {
       type: String,
@@ -76,16 +80,8 @@ const incidentSchema = new mongoose.Schema({
     }
   },
   media: {
-    images: [{
-      url: String,
-      caption: String,
-      uploadedAt: { type: Date, default: Date.now }
-    }],
-    videos: [{
-      url: String,
-      caption: String,
-      uploadedAt: { type: Date, default: Date.now }
-    }]
+    images: [{ url: String, caption: String, uploadedAt: { type: Date, default: Date.now } }],
+    videos: [{ url: String, caption: String, uploadedAt: { type: Date, default: Date.now } }]
   },
   status: {
     type: String,
@@ -93,31 +89,14 @@ const incidentSchema = new mongoose.Schema({
     default: 'active'
   },
   resolvedAt: Date,
-  resolvedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
+  resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   resolutionNotes: String,
   tags: [String],
   community: {
-    upvotes: [{
-      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      timestamp: { type: Date, default: Date.now }
-    }],
-    downvotes: [{
-      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      timestamp: { type: Date, default: Date.now }
-    }],
-    comments: [{
-      user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      text: String,
-      isAnonymous: { type: Boolean, default: false },
-      timestamp: { type: Date, default: Date.now }
-    }],
-    relatedIncidents: [{
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'Incident'
-    }]
+    upvotes: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }],
+    downvotes: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }],
+    comments: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, text: String, isAnonymous: { type: Boolean, default: false }, timestamp: { type: Date, default: Date.now } }],
+    relatedIncidents: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Incident' }]
   },
   alerts: {
     pushSent: { type: Boolean, default: false },
@@ -128,73 +107,19 @@ const incidentSchema = new mongoose.Schema({
   metadata: {
     ipAddress: String,
     userAgent: String,
-    deviceInfo: {
-      type: String,
-      platform: String,
-      version: String
-    }
+    deviceInfo: { type: String, platform: String, version: String }
   }
-}, {
-  timestamps: true
-});
+}, { timestamps: true });
 
-// Indexes for efficient querying
-incidentSchema.index({ 'location.coordinates': '2dsphere' });
-incidentSchema.index({ type: 1, createdAt: -1 });
-incidentSchema.index({ severity: 1, createdAt: -1 });
-incidentSchema.index({ 'verification.status': 1, createdAt: -1 });
-incidentSchema.index({ status: 1, createdAt: -1 });
+// Geospatial index
+incidentSchema.index({ location: '2dsphere' });
 
-// Virtual for vote count
+// Virtuals
 incidentSchema.virtual('voteCount').get(function() {
   return this.community.upvotes.length - this.community.downvotes.length;
 });
-
-// Virtual for comment count
 incidentSchema.virtual('commentCount').get(function() {
   return this.community.comments.length;
 });
 
-// Method to check if user has voted
-incidentSchema.methods.hasUserVoted = function(userId) {
-  const upvoted = this.community.upvotes.some(vote => vote.user.toString() === userId.toString());
-  const downvoted = this.community.downvotes.some(vote => vote.user.toString() === userId.toString());
-  return { upvoted, downvoted };
-};
-
-// Method to add vote
-incidentSchema.methods.addVote = function(userId, voteType) {
-  const voteData = { user: userId, timestamp: new Date() };
-  
-  if (voteType === 'upvote') {
-    // Remove from downvotes if exists
-    this.community.downvotes = this.community.downvotes.filter(
-      vote => vote.user.toString() !== userId.toString()
-    );
-    // Add to upvotes if not already there
-    if (!this.community.upvotes.some(vote => vote.user.toString() === userId.toString())) {
-      this.community.upvotes.push(voteData);
-    }
-  } else if (voteType === 'downvote') {
-    // Remove from upvotes if exists
-    this.community.upvotes = this.community.upvotes.filter(
-      vote => vote.user.toString() !== userId.toString()
-    );
-    // Add to downvotes if not already there
-    if (!this.community.downvotes.some(vote => vote.user.toString() === userId.toString())) {
-      this.community.downvotes.push(voteData);
-    }
-  }
-};
-
-// Pre-save middleware to update status based on verification
-incidentSchema.pre('save', function(next) {
-  if (this.verification.status === 'verified' && this.status === 'active') {
-    this.status = 'active';
-  } else if (this.verification.status === 'false-alarm') {
-    this.status = 'false-alarm';
-  }
-  next();
-});
-
-module.exports = mongoose.model('Incident', incidentSchema); 
+module.exports = mongoose.model('Incident', incidentSchema);

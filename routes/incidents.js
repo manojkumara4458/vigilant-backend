@@ -1,12 +1,12 @@
 const express = require('express');
-const { body, validationResult, query } = require('express-validator');
-const Incident = require('../models/Incident');
-const User = require('../models/User');
-const Neighborhood = require('../models/Neighborhood');
-const { auth, optionalAuth, authorize } = require('../middleware/auth');
-const { io } = require('../index');
-
 const router = express.Router();
+const { body, query, validationResult } = require('express-validator');
+const Incident = require('../models/Incident');
+const auth = require('../middleware/auth');
+const optionalAuth = require('../middleware/optionalAuth');
+const Neighborhood = require('../models/Neighborhood');
+const User = require('../models/User');
+// Assuming `io` is initialized somewhere globally for socket.io
 
 /**
  * =========================
@@ -41,8 +41,6 @@ router.post(
     body('isAnonymous').optional().isBoolean(),
   ],
   async (req, res) => {
-    console.log('POST /api/incidents body:', JSON.stringify(req.body, null, 2));
-
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
@@ -59,39 +57,30 @@ router.post(
       } = req.body;
 
       // Ensure coordinates are numbers
-      location.coordinates = location.coordinates.map((coord) => Number(coord));
+      location.coordinates = location.coordinates.map(coord => Number(coord));
       const [lng, lat] = location.coordinates;
 
       // Find neighborhood by proximity (5km)
       let neighborhood = await Neighborhood.findOne({
         'boundaries.center': {
           $near: {
-            $geometry: {
-              type: 'Point',
-              coordinates: [lng, lat],
-            },
+            $geometry: { type: 'Point', coordinates: [lng, lat] },
             $maxDistance: 5000,
           },
         },
       });
 
-      // If neighborhood doesn't exist, create default one with proper center.lng/lat
       if (!neighborhood) {
         neighborhood = new Neighborhood({
           name: 'Default Neighborhood',
           city: location.address?.city || 'Unknown City',
           state: location.address?.state || 'Unknown State',
           boundaries: {
-            center: {
-              type: 'Point',
-              lng,
-              lat,
-            },
+            center: { type: 'Point', lng, lat },
             radius: 2,
           },
           stats: { totalIncidents: 0, incidentsThisMonth: 0 },
         });
-
         await neighborhood.save();
       }
 
@@ -101,11 +90,7 @@ router.post(
         description,
         type,
         severity,
-        location: {
-          type: 'Point',
-          coordinates: { lng, lat },
-          neighborhood: neighborhood._id,
-        },
+        location: { type: 'Point', coordinates: { lng, lat }, neighborhood: neighborhood._id },
         reporter: req.user._id,
         isAnonymous,
         media,
@@ -242,7 +227,5 @@ router.get(
     }
   }
 );
-
-// The rest of GET by ID, PUT, vote, comments, stats endpoints remain unchanged
 
 module.exports = router;
