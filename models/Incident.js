@@ -1,9 +1,10 @@
 const mongoose = require('mongoose');
 
+// Define schema
 const incidentSchema = new mongoose.Schema({
+  // Basic incident details
   title: {
     type: String,
-    required: true,
     trim: true,
     maxlength: 200
   },
@@ -28,6 +29,8 @@ const incidentSchema = new mongoose.Schema({
     enum: ['low', 'medium', 'high', 'critical'],
     default: 'medium'
   },
+
+  // 🌍 Location (GeoJSON Format)
   location: {
     type: {
       type: String,
@@ -36,7 +39,7 @@ const incidentSchema = new mongoose.Schema({
       default: 'Point'
     },
     coordinates: {
-      type: [Number], // ✅ Must be [lng, lat]
+      type: [Number], // [lng, lat]
       required: true,
       validate: {
         validator: function(v) {
@@ -57,6 +60,8 @@ const incidentSchema = new mongoose.Schema({
       ref: 'Neighborhood'
     }
   },
+
+  // 👤 Reporter details
   reporter: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -66,6 +71,8 @@ const incidentSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
+
+  // 🔍 Verification
   verification: {
     status: {
       type: String,
@@ -79,10 +86,14 @@ const incidentSchema = new mongoose.Schema({
       enum: ['police', 'fire-department', 'community-moderator', 'multiple-reports']
     }
   },
+
+  // 🖼️ Media
   media: {
     images: [{ url: String, caption: String, uploadedAt: { type: Date, default: Date.now } }],
     videos: [{ url: String, caption: String, uploadedAt: { type: Date, default: Date.now } }]
   },
+
+  // 📊 Status & resolution
   status: {
     type: String,
     enum: ['active', 'resolved', 'false-alarm', 'expired'],
@@ -92,26 +103,35 @@ const incidentSchema = new mongoose.Schema({
   resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   resolutionNotes: String,
   tags: [String],
+
+  // 💬 Community section
   community: {
     upvotes: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }],
     downvotes: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }],
     comments: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, text: String, isAnonymous: { type: Boolean, default: false }, timestamp: { type: Date, default: Date.now } }],
     relatedIncidents: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Incident' }]
   },
+
+  // 🔔 Alerts
   alerts: {
     pushSent: { type: Boolean, default: false },
     emailSent: { type: Boolean, default: false },
     smsSent: { type: Boolean, default: false },
     sentAt: Date
   },
+
+  // 🧠 Metadata
   metadata: {
     ipAddress: String,
     userAgent: String,
-    deviceInfo: { type: String, platform: String, version: String }
+    deviceInfo: {
+      type: Map,
+      of: String
+    }
   }
 }, { timestamps: true });
 
-// Geospatial index
+// Geospatial index for map queries
 incidentSchema.index({ location: '2dsphere' });
 
 // Virtuals
