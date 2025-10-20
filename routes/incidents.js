@@ -43,7 +43,8 @@ router.post(
   async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+      if (!errors.isEmpty())
+        return res.status(400).json({ errors: errors.array() });
 
       const {
         title,
@@ -56,8 +57,13 @@ router.post(
         tags = [],
       } = req.body;
 
-      // Ensure coordinates are numbers
-      location.coordinates = location.coordinates.map(coord => Number(coord));
+      // ✅ Ensure coordinates are numbers
+      location.coordinates = location.coordinates.map((coord) => Number(coord));
+      if (location.coordinates.some(isNaN)) {
+        return res
+          .status(400)
+          .json({ error: 'Coordinates must be valid numbers [lng, lat]' });
+      }
       const [lng, lat] = location.coordinates;
 
       // Find neighborhood by proximity (5km)
@@ -70,6 +76,7 @@ router.post(
         },
       });
 
+      // If neighborhood doesn't exist, create default
       if (!neighborhood) {
         neighborhood = new Neighborhood({
           name: 'Default Neighborhood',
