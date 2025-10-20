@@ -8,9 +8,12 @@ const { io } = require('../index');
 
 const router = express.Router();
 
-// @route   POST /api/incidents
-// @desc    Report a new incident
-// @access  Private
+/**
+ * =========================
+ * POST /api/incidents
+ * Report a new incident
+ * =========================
+ */
 router.post('/', auth, [
   body('title').trim().isLength({ min: 5, max: 200 }),
   body('description').trim().isLength({ min: 10, max: 2000 }),
@@ -20,18 +23,16 @@ router.post('/', auth, [
     'noise-disturbance', 'traffic-violation', 'other'
   ]),
   body('severity').isIn(['low', 'medium', 'high', 'critical']),
-  body('location.coordinates.lat').isFloat({ min: -90, max: 90 }),
-  body('location.coordinates.lng').isFloat({ min: -180, max: 180 }),
+  body('location.type').equals('Point'),
+  body('location.coordinates').isArray({ min: 2, max: 2 }),
+  body('location.coordinates.*').isFloat(),
   body('isAnonymous').optional().isBoolean()
 ], async (req, res) => {
-  // Add logging for debugging
   console.log('POST /api/incidents body:', JSON.stringify(req.body, null, 2));
+
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      console.log('Validation errors:', errors.array());
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const {
       title,
@@ -40,31 +41,33 @@ router.post('/', auth, [
       severity,
       location,
       isAnonymous = false,
-      media,
-      tags
+      media = { images: [], videos: [] },
+      tags = []
     } = req.body;
 
-    // Find or create neighborhood based on location
+    // Ensure coordinates are numbers
+    location.coordinates = location.coordinates.map(coord => Number(coord));
+
+    // Find neighborhood by proximity (5km)
     let neighborhood = await Neighborhood.findOne({
       'boundaries.center': {
         $near: {
           $geometry: {
             type: 'Point',
-            coordinates: [location.coordinates.lng, location.coordinates.lat]
+            coordinates: location.coordinates
           },
-          $maxDistance: 5000 // 5km
+          $maxDistance: 5000
         }
       }
     });
 
     if (!neighborhood) {
-      // Create a default neighborhood if none exists
       neighborhood = new Neighborhood({
         name: 'Default Neighborhood',
         city: location.address?.city || 'Unknown City',
         state: location.address?.state || 'Unknown State',
         boundaries: {
-          center: location.coordinates,
+          center: { type: 'Point', coordinates: location.coordinates },
           radius: 2
         }
       });
@@ -77,11 +80,8 @@ router.post('/', auth, [
       description,
       type,
       severity,
-      location: {
-        ...location,
-        neighborhood: neighborhood._id
-      },
-      reporter: req.user.id,
+      location: { ...location, neighborhood: neighborhood._id },
+      reporter: req.user._id,
       isAnonymous,
       media,
       tags
@@ -90,9 +90,7 @@ router.post('/', auth, [
     await incident.save();
 
     // Update user stats
-    await User.findByIdAndUpdate(req.user.id, {
-      $inc: { 'stats.reportsSubmitted': 1 }
-    });
+    await User.findByIdAndUpdate(req.user._id, { $inc: { 'stats.reportsSubmitted': 1 } });
 
     // Update neighborhood stats
     await Neighborhood.findByIdAndUpdate(neighborhood._id, {
@@ -111,7 +109,7 @@ router.post('/', auth, [
       });
     }
 
-    // Populate reporter info for response
+    // Populate reporter info
     await incident.populate('reporter', 'firstName lastName');
 
     res.status(201).json(incident);
@@ -121,9 +119,13 @@ router.post('/', auth, [
   }
 });
 
-// @route   GET /api/incidents
-// @desc    Get incidents with filters
-// @access  Public (with optional auth)
+
+/**
+ * =========================
+ * GET /api/incidents
+ * Get incidents with filters
+ * =========================
+ */
 router.get('/', optionalAuth, [
   query('lat').optional().isFloat({ min: -90, max: 90 }),
   query('lng').optional().isFloat({ min: -180, max: 180 }),
@@ -141,9 +143,7 @@ router.get('/', optionalAuth, [
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const {
       lat,
@@ -160,25 +160,18 @@ router.get('/', optionalAuth, [
     const skip = (page - 1) * limit;
     const filter = { status };
 
-    // Location-based filtering
     if (lat && lng) {
-      filter['location.coordinates'] = {
+      filter['location'] = {
         $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)]
-          },
-          $maxDistance: radius * 1609.34 // Convert miles to meters
+          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
+          $maxDistance: radius * 1609.34 // miles → meters
         }
       };
     }
 
-    // Type and severity filters
     if (type) filter.type = type;
     if (severity) filter.severity = severity;
-    if (verified !== undefined) {
-      filter['verification.status'] = verified ? 'verified' : 'pending';
-    }
+    if (verified !== undefined) filter['verification.status'] = verified ? 'verified' : 'pending';
 
     const incidents = await Incident.find(filter)
       .populate('reporter', 'firstName lastName')
@@ -189,10 +182,9 @@ router.get('/', optionalAuth, [
 
     const total = await Incident.countDocuments(filter);
 
-    // Add user-specific data if authenticated
     if (req.user) {
       incidents.forEach(incident => {
-        const { upvoted, downvoted } = incident.hasUserVoted(req.user.id);
+        const { upvoted, downvoted } = incident.hasUserVoted(req.user._id);
         incident.userVote = upvoted ? 'upvote' : downvoted ? 'downvote' : null;
       });
     }
@@ -212,9 +204,13 @@ router.get('/', optionalAuth, [
   }
 });
 
-// @route   GET /api/incidents/:id
-// @desc    Get incident by ID
-// @access  Public
+
+/**
+ * =========================
+ * GET /api/incidents/:id
+ * Get incident by ID
+ * =========================
+ */
 router.get('/:id', optionalAuth, async (req, res) => {
   try {
     const incident = await Incident.findById(req.params.id)
@@ -224,13 +220,10 @@ router.get('/:id', optionalAuth, async (req, res) => {
       .populate('resolvedBy', 'firstName lastName')
       .populate('community.comments.user', 'firstName lastName');
 
-    if (!incident) {
-      return res.status(404).json({ error: 'Incident not found' });
-    }
+    if (!incident) return res.status(404).json({ error: 'Incident not found' });
 
-    // Add user-specific data if authenticated
     if (req.user) {
-      const { upvoted, downvoted } = incident.hasUserVoted(req.user.id);
+      const { upvoted, downvoted } = incident.hasUserVoted(req.user._id);
       incident.userVote = upvoted ? 'upvote' : downvoted ? 'downvote' : null;
     }
 
@@ -241,17 +234,19 @@ router.get('/:id', optionalAuth, async (req, res) => {
   }
 });
 
-// @route   PUT /api/incidents/:id
-// @desc    Update incident (moderators/admins only)
-// @access  Private
+
+/**
+ * =========================
+ * PUT /api/incidents/:id
+ * Update incident (moderators/admins only)
+ * =========================
+ */
 router.put('/:id', auth, authorize('moderator', 'admin', 'first-responder'), async (req, res) => {
   try {
     const { verification, status, resolutionNotes } = req.body;
 
     const incident = await Incident.findById(req.params.id);
-    if (!incident) {
-      return res.status(404).json({ error: 'Incident not found' });
-    }
+    if (!incident) return res.status(404).json({ error: 'Incident not found' });
 
     const updateFields = {};
 
@@ -259,7 +254,7 @@ router.put('/:id', auth, authorize('moderator', 'admin', 'first-responder'), asy
       updateFields.verification = {
         ...incident.verification,
         ...verification,
-        verifiedBy: req.user.id,
+        verifiedBy: req.user._id,
         verifiedAt: new Date()
       };
     }
@@ -268,13 +263,11 @@ router.put('/:id', auth, authorize('moderator', 'admin', 'first-responder'), asy
       updateFields.status = status;
       if (status === 'resolved') {
         updateFields.resolvedAt = new Date();
-        updateFields.resolvedBy = req.user.id;
+        updateFields.resolvedBy = req.user._id;
       }
     }
 
-    if (resolutionNotes) {
-      updateFields.resolutionNotes = resolutionNotes;
-    }
+    if (resolutionNotes) updateFields.resolutionNotes = resolutionNotes;
 
     const updatedIncident = await Incident.findByIdAndUpdate(
       req.params.id,
@@ -289,71 +282,58 @@ router.put('/:id', auth, authorize('moderator', 'admin', 'first-responder'), asy
   }
 });
 
-// @route   POST /api/incidents/:id/vote
-// @desc    Vote on incident
-// @access  Private
+
+/**
+ * =========================
+ * POST /api/incidents/:id/vote
+ * Vote on incident
+ * =========================
+ */
 router.post('/:id/vote', auth, [
   body('voteType').isIn(['upvote', 'downvote'])
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { voteType } = req.body;
-
     const incident = await Incident.findById(req.params.id);
-    if (!incident) {
-      return res.status(404).json({ error: 'Incident not found' });
-    }
+    if (!incident) return res.status(404).json({ error: 'Incident not found' });
 
-    incident.addVote(req.user.id, voteType);
+    incident.addVote(req.user._id, voteType);
     await incident.save();
 
-    res.json({ 
-      voteCount: incident.voteCount,
-      userVote: voteType
-    });
+    res.json({ voteCount: incident.voteCount, userVote: voteType });
   } catch (error) {
     console.error('Vote error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// @route   POST /api/incidents/:id/comments
-// @desc    Add comment to incident
-// @access  Private
+
+/**
+ * =========================
+ * POST /api/incidents/:id/comments
+ * Add comment to incident
+ * =========================
+ */
 router.post('/:id/comments', auth, [
   body('text').trim().isLength({ min: 1, max: 500 }),
   body('isAnonymous').optional().isBoolean()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { text, isAnonymous = false } = req.body;
-
     const incident = await Incident.findById(req.params.id);
-    if (!incident) {
-      return res.status(404).json({ error: 'Incident not found' });
-    }
+    if (!incident) return res.status(404).json({ error: 'Incident not found' });
 
-    incident.community.comments.push({
-      user: req.user.id,
-      text,
-      isAnonymous
-    });
-
+    incident.community.comments.push({ user: req.user._id, text, isAnonymous });
     await incident.save();
-
-    // Populate the new comment
     await incident.populate('community.comments.user', 'firstName lastName');
 
     const newComment = incident.community.comments[incident.community.comments.length - 1];
-
     res.json(newComment);
   } catch (error) {
     console.error('Add comment error:', error);
@@ -361,21 +341,22 @@ router.post('/:id/comments', auth, [
   }
 });
 
-// @route   GET /api/incidents/stats/summary
-// @desc    Get incident statistics
-// @access  Public
+
+/**
+ * =========================
+ * GET /api/incidents/stats/summary
+ * Get incident statistics
+ * =========================
+ */
 router.get('/stats/summary', async (req, res) => {
   try {
     const { lat, lng, radius = 5 } = req.query;
 
     let locationFilter = {};
     if (lat && lng) {
-      locationFilter['location.coordinates'] = {
+      locationFilter['location'] = {
         $near: {
-          $geometry: {
-            type: 'Point',
-            coordinates: [parseFloat(lng), parseFloat(lat)]
-          },
+          $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
           $maxDistance: radius * 1609.34
         }
       };
@@ -387,15 +368,8 @@ router.get('/stats/summary', async (req, res) => {
         $group: {
           _id: null,
           total: { $sum: 1 },
-          byType: {
-            $push: {
-              type: '$type',
-              severity: '$severity'
-            }
-          },
-          bySeverity: {
-            $push: '$severity'
-          }
+          byType: { $push: '$type' },
+          bySeverity: { $push: '$severity' }
         }
       }
     ]);
@@ -404,24 +378,15 @@ router.get('/stats/summary', async (req, res) => {
     const severityStats = {};
 
     if (stats.length > 0) {
-      stats[0].byType.forEach(item => {
-        typeStats[item.type] = (typeStats[item.type] || 0) + 1;
-      });
-
-      stats[0].bySeverity.forEach(severity => {
-        severityStats[severity] = (severityStats[severity] || 0) + 1;
-      });
+      stats[0].byType.forEach(type => { typeStats[type] = (typeStats[type] || 0) + 1; });
+      stats[0].bySeverity.forEach(sev => { severityStats[sev] = (severityStats[sev] || 0) + 1; });
     }
 
-    res.json({
-      total: stats.length > 0 ? stats[0].total : 0,
-      byType: typeStats,
-      bySeverity: severityStats
-    });
+    res.json({ total: stats.length > 0 ? stats[0].total : 0, byType: typeStats, bySeverity: severityStats });
   } catch (error) {
     console.error('Get stats error:', error);
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-module.exports = router; 
+module.exports = router;
