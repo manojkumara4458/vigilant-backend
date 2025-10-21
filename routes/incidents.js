@@ -77,7 +77,7 @@ router.post(
           name: 'Default Neighborhood',
           city: location.address?.city || 'Unknown City',
           state: location.address?.state || 'Unknown State',
-          boundaries: { center: { type: 'Point', lng, lat }, radius: 2 },
+          boundaries: { center: { type: 'Point', coordinates: [lng, lat] }, radius: 2 },
           stats: { totalIncidents: 0, incidentsThisMonth: 0 },
         });
         await neighborhood.save();
@@ -89,7 +89,7 @@ router.post(
         description,
         type,
         severity,
-        location: { type: 'Point', coordinates: { lng, lat }, neighborhood: neighborhood._id },
+        location: { type: 'Point', coordinates: [lng, lat], neighborhood: neighborhood._id },
         reporter: req.user._id,
         isAnonymous,
         media,
@@ -131,7 +131,7 @@ router.post(
 /**
  * =========================
  * GET /api/incidents
- * Get incidents with filters
+ * Get incidents with filters (no voting logic)
  * =========================
  */
 router.get(
@@ -185,7 +185,7 @@ router.get(
         filter['location'] = {
           $near: {
             $geometry: { type: 'Point', coordinates: [parseFloat(lng), parseFloat(lat)] },
-            $maxDistance: radius * 1609.34,
+            $maxDistance: radius * 1609.34, // miles to meters
           },
         };
       }
@@ -202,14 +202,6 @@ router.get(
         .limit(parseInt(limit));
 
       const total = await Incident.countDocuments(filter);
-
-      // Attach user vote info if logged in
-      if (req.user) {
-        incidents.forEach((incident) => {
-          const { upvoted, downvoted } = incident.hasUserVoted(req.user._id);
-          incident.userVote = upvoted ? 'upvote' : downvoted ? 'downvote' : null;
-        });
-      }
 
       res.json({
         incidents,
