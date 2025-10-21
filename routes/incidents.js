@@ -1,12 +1,13 @@
+// server/routes/incidents.js
 const express = require('express');
 const router = express.Router();
 const { body, query, validationResult } = require('express-validator');
+
 const Incident = require('../models/Incident');
-const auth = require('../middleware/auth');
-const optionalAuth = require('../middleware/optionalAuth');
 const Neighborhood = require('../models/Neighborhood');
 const User = require('../models/User');
-// Assuming `io` is initialized somewhere globally for socket.io
+const { auth, optionalAuth } = require('../middleware/auth'); // ✅ single import
+const { io } = require('../index'); // make sure index.js exports io
 
 /**
  * =========================
@@ -43,8 +44,7 @@ router.post(
   async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty())
-        return res.status(400).json({ errors: errors.array() });
+      if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
       const {
         title,
@@ -57,13 +57,8 @@ router.post(
         tags = [],
       } = req.body;
 
-      // ✅ Ensure coordinates are numbers
-      location.coordinates = location.coordinates.map((coord) => Number(coord));
-      if (location.coordinates.some(isNaN)) {
-        return res
-          .status(400)
-          .json({ error: 'Coordinates must be valid numbers [lng, lat]' });
-      }
+      // Ensure coordinates are numbers
+      location.coordinates = location.coordinates.map(Number);
       const [lng, lat] = location.coordinates;
 
       // Find neighborhood by proximity (5km)
@@ -82,10 +77,7 @@ router.post(
           name: 'Default Neighborhood',
           city: location.address?.city || 'Unknown City',
           state: location.address?.state || 'Unknown State',
-          boundaries: {
-            center: { type: 'Point', lng, lat },
-            radius: 2,
-          },
+          boundaries: { center: { type: 'Point', lng, lat }, radius: 2 },
           stats: { totalIncidents: 0, incidentsThisMonth: 0 },
         });
         await neighborhood.save();
@@ -103,7 +95,6 @@ router.post(
         media,
         tags,
       });
-
       await incident.save();
 
       // Update user stats
@@ -212,6 +203,7 @@ router.get(
 
       const total = await Incident.countDocuments(filter);
 
+      // Attach user vote info if logged in
       if (req.user) {
         incidents.forEach((incident) => {
           const { upvoted, downvoted } = incident.hasUserVoted(req.user._id);
