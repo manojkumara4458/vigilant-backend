@@ -1,134 +1,92 @@
-const express = require("express");
-const router = express.Router();
-const Incident = require("../models/incident");
-const User = require("../models/user"); // if you reference reporter
-const auth = require("../middleware/auth"); // if you use JWT auth
+const mongoose = require('mongoose');
 
-// 🚨 Create a new incident
-router.post("/", auth, async (req, res) => {
-  try {
-    const {
-      title,
-      description,
-      type,
-      severity,
-      location,
-      reporter,
-      isAnonymous,
-      media,
-    } = req.body;
+const incidentSchema = new mongoose.Schema({
+  // Basic incident details
+  title: { type: String, trim: true, maxlength: 200 },
+  description: { type: String, required: true, trim: true, maxlength: 2000 },
+  type: { 
+    type: String, required: true,
+    enum: [
+      'theft','vandalism','assault','suspicious-activity','fire',
+      'accident','medical-emergency','road-hazard','broken-infrastructure',
+      'noise-disturbance','traffic-violation','other'
+    ]
+  },
+  severity: { type: String, enum: ['low','medium','high','critical'], default: 'medium' },
 
-    if (!location || !location.coordinates) {
-      return res.status(400).json({
-        error: "Location coordinates [lng, lat] are required.",
-      });
-    }
+  // 🌍 Location (GeoJSON Format)
+  location: {
+    type: { type: String, enum: ['Point'], default: 'Point' },
+    coordinates: {
+      type: [Number],
+      required: true,
+      validate: {
+        validator: v => Array.isArray(v) && v.length === 2 && typeof v[0] === 'number' && typeof v[1] === 'number' && v[0] >= -180 && v[0] <= 180 && v[1] >= -90 && v[1] <= 90,
+        message: props => `${props.value} is not a valid [longitude, latitude] coordinate!`
+      }
+    },
+    neighborhood: { type: mongoose.Schema.Types.ObjectId, ref: 'Neighborhood' }
+  },
 
-    const incident = new Incident({
-      title,
-      description,
-      type,
-      severity,
-      location, // { type: "Point", coordinates: [lng, lat] }
-      reporter,
-      isAnonymous,
-      media,
-    });
+  // 👤 Reporter details
+  reporter: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  isAnonymous: { type: Boolean, default: false },
 
-    await incident.save();
+  // 🔍 Verification
+  verification: {
+    status: { type: String, enum: ['pending','verified','false-alarm','resolved'], default: 'pending' },
+    verifiedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    verifiedAt: Date,
+    verifiedSource: { type: String, enum: ['police','fire-department','community-moderator','multiple-reports'] }
+  },
 
-    res.status(201).json({
-      success: true,
-      message: "Incident created successfully",
-      incident,
-    });
-  } catch (err) {
-    console.error("Create incident error:", err);
-    res.status(500).json({
-      success: false,
-      error: err.message,
-    });
+  // 🖼️ Media
+  media: {
+    images: [{ url: String, caption: String, uploadedAt: { type: Date, default: Date.now } }],
+    videos: [{ url: String, caption: String, uploadedAt: { type: Date, default: Date.now } }]
+  },
+
+  // 📊 Status & resolution
+  status: { type: String, enum: ['active','resolved','false-alarm','expired'], default: 'active' },
+  resolvedAt: Date,
+  resolvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  resolutionNotes: String,
+  tags: [String],
+
+  // 💬 Community section
+  community: {
+    upvotes: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }],
+    downvotes: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }],
+    comments: [{ user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' }, text: String, isAnonymous: { type: Boolean, default: false }, timestamp: { type: Date, default: Date.now } }],
+    relatedIncidents: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Incident' }]
+  },
+
+  // 🔔 Alerts
+  alerts: {
+    pushSent: { type: Boolean, default: false },
+    emailSent: { type: Boolean, default: false },
+    smsSent: { type: Boolean, default: false },
+    sentAt: Date
+  },
+
+  // 🧠 Metadata
+  metadata: {
+    ipAddress: String,
+    userAgent: String,
+    deviceInfo: { type: Map, of: String }
   }
+
+}, { timestamps: true });
+
+// Geospatial index for map queries
+incidentSchema.index({ location: '2dsphere' });
+
+// Virtuals
+incidentSchema.virtual('voteCount').get(function() {
+  return this.community.upvotes.length - this.community.downvotes.length;
+});
+incidentSchema.virtual('commentCount').get(function() {
+  return this.community.comments.length;
 });
 
-// 📋 Get all incidents
-router.get("/", async (req, res) => {
-  try {
-    const incidents = await Incident.find()
-      .populate("reporter", "name email")
-      .sort({ createdAt: -1 });
-
-    res.status(200).json({
-      success: true,
-      count: incidents.length,
-      incidents,
-    });
-  } catch (err) {
-    console.error("Get incidents error:", err);
-    res.status(500).json({
-      success: false,
-      error: err.message,
-    });
-  }
-});
-
-// 🗺️ Get incidents near a location
-router.get("/nearby", async (req, res) => {
-  try {
-    const { lng, lat, radius = 5000 } = req.query;
-
-    if (!lng || !lat) {
-      return res
-        .status(400)
-        .json({ error: "Longitude and latitude are required." });
-    }
-
-    const incidents = await Incident.find({
-      location: {
-        $near: {
-          $geometry: { type: "Point", coordinates: [parseFloat(lng), parseFloat(lat)] },
-          $maxDistance: parseFloat(radius),
-        },
-      },
-    });
-
-    res.json({ success: true, count: incidents.length, incidents });
-  } catch (err) {
-    console.error("Nearby incidents error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ✅ Update an incident’s status (resolve, verify, etc.)
-router.put("/:id/status", auth, async (req, res) => {
-  try {
-    const { status, resolutionNotes } = req.body;
-    const incident = await Incident.findByIdAndUpdate(
-      req.params.id,
-      { status, resolutionNotes, resolvedAt: new Date() },
-      { new: true }
-    );
-
-    if (!incident) return res.status(404).json({ error: "Incident not found" });
-
-    res.json({ success: true, incident });
-  } catch (err) {
-    console.error("Update incident error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// 🗑️ Delete an incident
-router.delete("/:id", auth, async (req, res) => {
-  try {
-    const incident = await Incident.findByIdAndDelete(req.params.id);
-    if (!incident) return res.status(404).json({ error: "Incident not found" });
-
-    res.json({ success: true, message: "Incident deleted successfully" });
-  } catch (err) {
-    console.error("Delete incident error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-module.exports = router;
+module.exports = mongoose.model('Incident', incidentSchema);
