@@ -55,19 +55,11 @@ const neighborhoodSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User'
   }],
-  stats: {
-    totalResidents: { type: Number, default: 0 },
-    activeResidents: { type: Number, default: 0 },
-    totalIncidents: { type: Number, default: 0 },
-    incidentsThisMonth: { type: Number, default: 0 },
-    averageResponseTime: { type: Number, default: 0 }, // minutes
-    safetyScore: { type: Number, default: 0 } // 0-100
-  },
   settings: {
     isPublic: { type: Boolean, default: true },
     requireApproval: { type: Boolean, default: false },
     allowAnonymousReports: { type: Boolean, default: true },
-    autoVerifyThreshold: { type: Number, default: 3 }, // number of reports needed
+    autoVerifyThreshold: { type: Number, default: 3 },
     emergencyContacts: [{
       name: String,
       phone: String,
@@ -116,12 +108,9 @@ neighborhoodSchema.index({ name: 'text', description: 'text' });
 // Method to check if coordinates are within neighborhood
 neighborhoodSchema.methods.containsLocation = function(lat, lng) {
   const { center, radius } = this.boundaries;
-  
-  // Simple distance calculation (can be improved with more accurate formula)
   const distance = Math.sqrt(
     Math.pow(lat - center.lat, 2) + Math.pow(lng - center.lng, 2)
-  ) * 69; // Convert to miles (rough approximation)
-  
+  ) * 69; // rough miles
   return distance <= radius;
 };
 
@@ -134,7 +123,7 @@ neighborhoodSchema.statics.findNearby = function(lat, lng, maxDistance = 10) {
           type: 'Point',
           coordinates: [lng, lat]
         },
-        $maxDistance: maxDistance * 1609.34 // Convert miles to meters
+        $maxDistance: maxDistance * 1609.34 // meters
       }
     }
   });
@@ -145,10 +134,4 @@ neighborhoodSchema.virtual('fullAddress').get(function() {
   return `${this.city}, ${this.state} ${this.zipCode}`;
 });
 
-// Pre-save middleware to update stats
-neighborhoodSchema.pre('save', function(next) {
-  // This would be updated by aggregation queries in practice
-  next();
-});
-
-module.exports = mongoose.model('Neighborhood', neighborhoodSchema); 
+module.exports = mongoose.model('Neighborhood', neighborhoodSchema);
