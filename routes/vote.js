@@ -1,7 +1,7 @@
 // server/routes/votes.js
 const express = require('express');
 const router = express.Router();
-const Vote = require('../models/Vote');
+const Vote = require('../models/vote');
 const verifyToken = require('../middleware/auth'); // adjust path if needed
 const mongoose = require('mongoose');
 
