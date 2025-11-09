@@ -1,6 +1,8 @@
+// server/middleware/auth.js
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+// ------------------ Authentication middleware ------------------
 const auth = async (req, res, next) => {
   try {
     // Get token from header
@@ -19,7 +21,7 @@ const auth = async (req, res, next) => {
       return res.status(401).json({ error: 'Token is not valid' });
     }
 
-    req.user = user;
+    req.user = user; // attach user to request
     next();
   } catch (error) {
     console.error('Auth middleware error:', error);
@@ -27,7 +29,8 @@ const auth = async (req, res, next) => {
   }
 };
 
-// Optional auth middleware for routes that can work with or without authentication
+// ------------------ Optional authentication ------------------
+// For routes that can work with or without login
 const optionalAuth = async (req, res, next) => {
   try {
     const token = req.header('Authorization')?.replace('Bearer ', '');
@@ -47,7 +50,7 @@ const optionalAuth = async (req, res, next) => {
   }
 };
 
-// Role-based authorization middleware
+// ------------------ Role-based authorization ------------------
 const authorize = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -62,4 +65,4 @@ const authorize = (...roles) => {
   };
 };
 
-module.exports = { auth, optionalAuth, authorize }; 
+module.exports = { auth, optionalAuth, authorize };
