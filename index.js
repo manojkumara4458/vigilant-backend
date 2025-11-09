@@ -12,7 +12,7 @@ const incidentRoutes = require('./routes/incidents');
 const alertRoutes = require('./routes/alerts');
 const userRoutes = require('./routes/users');
 const safetyRoutes = require('./routes/safety');
-const voteRoutes = require('./routes/votes'); // <-- vote routes
+const voteRoutes = require('./routes/vote'); // <-- vote routes
 
 const app = express();
 const server = http.createServer(app);
