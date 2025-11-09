@@ -6,12 +6,13 @@ const http = require('http');
 const socketIo = require('socket.io');
 require('dotenv').config();
 
-// Import routes
+// ------------------ Import routes ------------------
 const authRoutes = require('./routes/auth');
 const incidentRoutes = require('./routes/incidents');
 const alertRoutes = require('./routes/alerts');
 const userRoutes = require('./routes/users');
 const safetyRoutes = require('./routes/safety');
+const voteRoutes = require('./routes/vote'); // <-- vote routes
 
 const app = express();
 const server = http.createServer(app);
@@ -28,7 +29,7 @@ app.use(cors({
     if (!origin) return callback(null, true); // allow mobile apps/curl
     const allowed = [process.env.CLIENT_URL, 'http://localhost:3000'].filter(Boolean);
     if (allowed.includes(origin)) return callback(null, true);
-    return callback(null, false);
+    return callback(new Error('Not allowed by CORS'));
   },
   credentials: true
 }));
@@ -42,6 +43,7 @@ app.use('/api/incidents', incidentRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/safety', safetyRoutes);
+app.use('/api/votes', voteRoutes); // <-- vote routes
 
 app.get('/', (req, res) => res.send('Backend is running 🚀'));
 
@@ -66,6 +68,11 @@ io.on('connection', (socket) => {
 
   socket.on('new-incident', (incident) => {
     socket.to(`neighborhood-${incident.neighborhoodId}`).emit('incident-alert', incident);
+  });
+
+  socket.on('vote-updated', (voteData) => {
+    // voteData should include: { incidentId, neighborhoodId, trueVotes, falseVotes }
+    socket.to(`neighborhood-${voteData.neighborhoodId}`).emit('vote-updated', voteData);
   });
 
   socket.on('disconnect', () => {
@@ -97,11 +104,9 @@ async function connectMongo() {
     console.log('✅ Connected to MongoDB');
   } catch (err) {
     console.error('❌ MongoDB connection error:', err.message || err);
-    // Retry connection every 5 seconds
     setTimeout(connectMongo, 5000);
   }
 
-  // Reconnect on disconnect
   mongoose.connection.on('disconnected', () => {
     console.warn('⚠️ MongoDB disconnected. Trying to reconnect...');
     setTimeout(connectMongo, 5000);
